@@ -260,7 +260,7 @@ async function connectToWhatsApp() {
         const energyBar = createHealthBar(updatedPlayer.energy);
         const weapon = WEAPONS[updatedPlayer.currentWeapon];
 
-        const statusMessage = `Salut ${updatedPlayer.name} ! 😊
+        const statusMessage = `@${sender.split('@')[0]} Salut ${updatedPlayer.name} ! 😊
 
 Voici ton état actuel :
 
@@ -275,7 +275,10 @@ Voici ton état actuel :
 
 🎯 Kills: ${updatedPlayer.kills} | 💀 Morts: ${updatedPlayer.deaths}`;
 
-        await sendMessageWithRetry(from, { text: statusMessage });
+        await sendMessageWithRetry(from, { 
+          text: statusMessage,
+          mentions: [sender]
+        });
       }
       
       else if (text.startsWith('/tire')) {
@@ -505,8 +508,15 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
         });
       }
 
+      else if (text === '/test') {
+        await sendMessageWithRetry(from, { 
+          text: `@${sender.split('@')[0]} ✅ TEST RÉUSSI ! Le bot fonctionne bien ! 🤖`,
+          mentions: [sender]
+        });
+      }
+      
       else if (text.startsWith('/aide') || text.startsWith('/help')) {
-        const helpMessage = `Salut ${senderName} ! 😄 Je suis ton bot de combat !
+        const helpMessage = `@${sender.split('@')[0]} Salut ${senderName} ! 😄 Je suis ton bot de combat !
 
 Voici ce que tu peux faire :
 
@@ -528,7 +538,10 @@ ${Object.entries(WEAPONS).map(([key, w]) =>
 💡 Tips : Ta vie remonte de 10% chaque minute !
 💀 Si tu meurs, tu attends 1h avant de revenir 😅`;
 
-        await sendMessageWithRetry(from, { text: helpMessage });
+        await sendMessageWithRetry(from, { 
+          text: helpMessage,
+          mentions: [sender]
+        });
       }
       
       else if (text.startsWith('/')) {
