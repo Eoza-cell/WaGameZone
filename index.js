@@ -107,13 +107,38 @@ async function connectToWhatsApp() {
 
   // Fonction pour envoyer un message avec retry et meilleure gestion des groupes
   const sendMessageWithRetry = async (chatId, messageContent, retries = 3) => {
+    console.log(`🚀 Tentative d'envoi vers ${chatId}`);
+    
     for (let i = 0; i < retries; i++) {
       try {
+        // Vérifier si c'est un groupe et si on a les permissions
+        if (chatId.endsWith('@g.us')) {
+          try {
+            const groupMetadata = await sock.groupMetadata(chatId);
+            console.log(`👥 Groupe: ${groupMetadata.subject}`);
+            console.log(`🔐 Participants: ${groupMetadata.participants.length}`);
+            
+            const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+            const botParticipant = groupMetadata.participants.find(p => p.id === botNumber);
+            
+            if (!botParticipant) {
+              console.log(`❌ Bot pas dans le groupe ${groupMetadata.subject}`);
+              throw new Error('Bot non membre du groupe');
+            }
+            
+            console.log(`🤖 Bot status dans le groupe: ${botParticipant.admin || 'member'}`);
+          } catch (metaError) {
+            console.error(`⚠️ Impossible de récupérer les métadonnées du groupe:`, metaError.message);
+          }
+        }
+        
         const result = await sock.sendMessage(chatId, messageContent);
         console.log(`✅ Message envoyé avec succès (tentative ${i + 1})`);
+        console.log(`📝 Contenu envoyé:`, messageContent.text?.substring(0, 50) + '...');
         return result;
       } catch (error) {
         console.error(`❌ Erreur envoi tentative ${i + 1}:`, error.message);
+        console.error(`🔍 Détails erreur:`, error);
         if (i === retries - 1) {
           console.error(`💥 Échec définitif après ${retries} tentatives`);
           throw error;
