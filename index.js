@@ -1,3 +1,4 @@
+
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -104,6 +105,24 @@ async function connectToWhatsApp() {
     logger: pino({ level: 'error' })
   });
 
+  // Fonction pour envoyer un message avec retry et meilleure gestion des groupes
+  const sendMessageWithRetry = async (chatId, messageContent, retries = 3) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const result = await sock.sendMessage(chatId, messageContent);
+        console.log(`✅ Message envoyé avec succès (tentative ${i + 1})`);
+        return result;
+      } catch (error) {
+        console.error(`❌ Erreur envoi tentative ${i + 1}:`, error.message);
+        if (i === retries - 1) {
+          console.error(`💥 Échec définitif après ${retries} tentatives`);
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+      }
+    }
+  };
+
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -132,17 +151,36 @@ async function connectToWhatsApp() {
     if (!msg.message || msg.key.fromMe) return;
 
     const from = msg.key.remoteJid;
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-    const sender = msg.key.participant || from;
-    const senderName = msg.pushName || 'Joueur';
+    const isGroup = from.endsWith('@g.us');
+    
+    // Extraction du texte depuis différents types de messages
+    let text = '';
+    if (msg.message.conversation) {
+      text = msg.message.conversation;
+    } else if (msg.message.extendedTextMessage?.text) {
+      text = msg.message.extendedTextMessage.text;
+    } else if (msg.message.imageMessage?.caption) {
+      text = msg.message.imageMessage.caption;
+    } else if (msg.message.videoMessage?.caption) {
+      text = msg.message.videoMessage.caption;
+    }
 
-    console.log(`📨 Message reçu de ${senderName}: ${text}`);
-    console.log(`🔍 Type de chat: ${from.endsWith('@g.us') ? 'Groupe' : 'Privé'}`);
+    const sender = msg.key.participant || from;
+    const senderName = msg.pushName || msg.key.participant?.split('@')[0] || 'Joueur';
+
+    console.log(`📨 Message reçu de ${senderName}: "${text}"`);
+    console.log(`🔍 Type de chat: ${isGroup ? 'Groupe' : 'Privé'}`);
     console.log(`👤 Sender ID: ${sender}`);
+    console.log(`🆔 Chat ID: ${from}`);
+
+    // Vérifier si c'est une commande
+    if (!text.startsWith('/')) {
+      console.log(`💬 Message non-commande ignoré: "${text}"`);
+      return;
+    }
 
     try {
-      // Attendre un peu pour s'assurer que le message est bien reçu
-      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log(`🔄 Traitement de la commande: "${text}"`);
       
       const player = await getOrCreatePlayer(sender, senderName);
       console.log(`🎮 Joueur chargé: ${player.name} (ID: ${player.id})`);
@@ -151,10 +189,9 @@ async function connectToWhatsApp() {
         console.log(`💀 Joueur ${player.name} est mort jusqu'à ${player.deadUntil}`);
         const remainingTime = Math.ceil((new Date(player.deadUntil) - new Date()) / 60000);
         if (remainingTime > 0) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: `💀 Vous êtes mort ! Réapparition dans ${remainingTime} minutes.` 
           });
-          console.log(`🔔 Message de mort envoyé à ${senderName}`);
         }
         return;
       }
@@ -185,19 +222,13 @@ async function connectToWhatsApp() {
 
 🎯 Kills: ${updatedPlayer.kills} | 💀 Morts: ${updatedPlayer.deaths}`;
 
-        await sock.sendMessage(from, { text: statusMessage });
-        console.log(`✅ Message statut envoyé à ${senderName}`);
-      }
-
-      else if (text === '/statut' || text.startsWith('/statut')) {
-        console.log(`📊 Commande statut reçue de ${senderName}`);
-        // Le code existe déjà au-dessus
+        await sendMessageWithRetry(from, { text: statusMessage });
       }
       
       else if (text.startsWith('/tire')) {
         console.log(`🔫 Commande tir reçue de ${senderName}`);
         if (!msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: '⚠️ Vous devez répondre au message de votre adversaire!\nUsage: /tire [partie]\nParties: tete, torse, bras, jambes' 
           });
           return;
@@ -207,35 +238,33 @@ async function connectToWhatsApp() {
         const bodyPart = args[1]?.toLowerCase();
 
         if (!bodyPart || !['tete', 'torse', 'bras', 'jambes'].includes(bodyPart)) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: '⚠️ Vous devez préciser la partie du corps!\nUsage: /tire [partie]\nParties: tete, torse, bras, jambes' 
           });
           return;
         }
 
-        const isGroup = from.endsWith('@g.us');
-
         if (!isGroup) {
-          await sock.sendMessage(from, { text: '⚠️ Le combat ne fonctionne que dans les groupes WhatsApp!' });
+          await sendMessageWithRetry(from, { text: '⚠️ Le combat ne fonctionne que dans les groupes WhatsApp!' });
           return;
         }
 
         const targetId = msg.message.extendedTextMessage.contextInfo.participant;
 
         if (!targetId || targetId === sender) {
-          await sock.sendMessage(from, { text: '⚠️ Impossible de tirer sur vous-même!' });
+          await sendMessageWithRetry(from, { text: '⚠️ Impossible de tirer sur vous-même!' });
           return;
         }
 
         const [target] = await db.select().from(players).where(eq(players.id, targetId));
 
         if (!target) {
-          await sock.sendMessage(from, { text: '⚠️ Joueur cible introuvable!' });
+          await sendMessageWithRetry(from, { text: '⚠️ Joueur cible introuvable!' });
           return;
         }
 
         if (target.isDead) {
-          await sock.sendMessage(from, { text: '💀 Ce joueur est déjà mort!' });
+          await sendMessageWithRetry(from, { text: '💀 Ce joueur est déjà mort!' });
           return;
         }
 
@@ -246,7 +275,7 @@ async function connectToWhatsApp() {
         );
 
         if (distance > weapon.range) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: `⚠️ Cible hors de portée! (Distance: ${Math.floor(distance)}m, Portée: ${weapon.range}m)` 
           });
           return;
@@ -294,7 +323,7 @@ async function connectToWhatsApp() {
           resultMessage += `\n\n💀 ${target.name} EST MORT!\n💰 +500$ pour ${player.name}`;
         }
 
-        await sock.sendMessage(from, { text: resultMessage });
+        await sendMessageWithRetry(from, { text: resultMessage });
       }
 
       else if (text.startsWith('/localisation')) {
@@ -316,7 +345,7 @@ ${nearbyLocations}
 
 Utilisez /deplacer [lieu] pour vous déplacer`;
 
-        await sock.sendMessage(from, { text: locMessage });
+        await sendMessageWithRetry(from, { text: locMessage });
       }
 
       else if (text.startsWith('/deplacer')) {
@@ -327,14 +356,14 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
         const locationData = LOCATIONS.find(l => l.name === newLocation);
 
         if (!locationData) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: '⚠️ Lieu invalide!\nLieux disponibles: ' + LOCATIONS.map(l => l.name).join(', ') 
           });
           return;
         }
 
         if (player.energy < 20) {
-          await sock.sendMessage(from, { text: '⚠️ Pas assez d\'énergie pour vous déplacer!' });
+          await sendMessageWithRetry(from, { text: '⚠️ Pas assez d\'énergie pour vous déplacer!' });
           return;
         }
 
@@ -349,7 +378,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
           })
           .where(eq(players.id, sender));
 
-        await sock.sendMessage(from, { 
+        await sendMessageWithRetry(from, { 
           text: `🏃 Déplacement vers ${locationData.name}!\n📍 Nouvelle position: (${newX}, ${newY})\n${locationData.description}\n⚡ -20% énergie` 
         });
       }
@@ -362,7 +391,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
         const weapon = WEAPONS[weaponName];
 
         if (!weapon) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: '⚠️ Arme invalide!\n\n🔫 ARMES DISPONIBLES:\n' + 
                   Object.entries(WEAPONS).map(([key, w]) => 
                     `• ${w.name}: ${w.price}$ (Portée: ${w.range}m)`
@@ -372,12 +401,12 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
         }
 
         if (player.weapons.includes(weaponName)) {
-          await sock.sendMessage(from, { text: '⚠️ Vous possédez déjà cette arme!' });
+          await sendMessageWithRetry(from, { text: '⚠️ Vous possédez déjà cette arme!' });
           return;
         }
 
         if (player.money < weapon.price) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: `⚠️ Pas assez d'argent! (${player.money}$ / ${weapon.price}$)` 
           });
           return;
@@ -393,7 +422,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
           })
           .where(eq(players.id, sender));
 
-        await sock.sendMessage(from, { 
+        await sendMessageWithRetry(from, { 
           text: `✅ ${weapon.name} acheté!\n💰 -${weapon.price}$\nUtilisez /equiper ${weaponName} pour l'équiper` 
         });
       }
@@ -404,7 +433,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
         const weaponName = args[1]?.toLowerCase();
 
         if (!player.weapons.includes(weaponName)) {
-          await sock.sendMessage(from, { 
+          await sendMessageWithRetry(from, { 
             text: '⚠️ Vous ne possédez pas cette arme!\nVos armes: ' + player.weapons.join(', ') 
           });
           return;
@@ -418,7 +447,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
           .where(eq(players.id, sender));
 
         const weapon = WEAPONS[weaponName];
-        await sock.sendMessage(from, { 
+        await sendMessageWithRetry(from, { 
           text: `✅ ${weapon.name} équipé!\n🎯 Dégâts: Tête ${weapon.damage.tete}%, Torse ${weapon.damage.torse}%, Bras ${weapon.damage.bras}%, Jambes ${weapon.damage.jambes}%` 
         });
       }
@@ -445,27 +474,21 @@ ${Object.entries(WEAPONS).map(([key, w]) =>
 ⚡ La vie se régénère de 10% par minute
 💀 Si vous mourrez, vous ne pouvez pas jouer pendant 1 heure`;
 
-        await sock.sendMessage(from, { text: helpMessage });
-        console.log(`✅ Message d'aide envoyé à ${senderName}`);
+        await sendMessageWithRetry(from, { text: helpMessage });
       }
       
       else if (text.startsWith('/')) {
         console.log(`❓ Commande inconnue reçue: ${text}`);
-        await sock.sendMessage(from, { 
+        await sendMessageWithRetry(from, { 
           text: `❌ Commande inconnue: ${text}\nUtilisez /aide pour voir les commandes disponibles.` 
         });
-        console.log(`❌ Message d'erreur envoyé pour commande inconnue`);
       }
       
-      else {
-        console.log(`💬 Message non-commande ignoré: ${text}`);
-      }
     } catch (error) {
       console.error('❌ Erreur détaillée:', error);
       console.error('📍 Contexte - From:', from, 'Sender:', sender, 'Text:', text);
       try {
-        await sock.sendMessage(from, { text: '❌ Une erreur est survenue!' });
-        console.log('🆘 Message d\'erreur envoyé');
+        await sendMessageWithRetry(from, { text: '❌ Une erreur est survenue!' });
       } catch (sendError) {
         console.error('💥 Impossible d\'envoyer le message d\'erreur:', sendError);
       }
