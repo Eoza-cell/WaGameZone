@@ -98,10 +98,10 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'error' }))
     },
     printQRInTerminal: true,
-    logger: pino({ level: 'silent' })
+    logger: pino({ level: 'error' })
   });
   
   sock.ev.on('connection.update', (update) => {
@@ -135,6 +135,8 @@ async function connectToWhatsApp() {
     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     const sender = msg.key.participant || from;
     const senderName = msg.pushName || 'Joueur';
+    
+    console.log(`📨 Message reçu de ${senderName}: ${text}`);
     
     try {
       const player = await getOrCreatePlayer(sender, senderName);
