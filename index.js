@@ -146,10 +146,8 @@ async function connectToWhatsApp() {
               console.log(`🔍 IDs testés:`, possibleBotIds);
               console.log(`👥 Participants du groupe:`, groupMetadata.participants.map(p => p.id));
               
-              // Arrêter l'envoi si le bot n'est pas membre
-              await sendMessageWithRetry(from, { 
-                text: `❌ Le bot n'est pas membre de ce groupe !\n\n🔧 **Solutions :**\n1. Supprimez le bot du groupe\n2. Rajoutez-le comme membre\n3. Faites-le administrateur pour plus de permissions\n\n📱 Ou testez en message privé d'abord !` 
-              });
+              // Le bot n'est pas membre, on ne peut pas envoyer de message dans ce groupe
+              console.log(`🚫 Impossible d'envoyer dans ce groupe - bot non membre`);
               return null; // Arrêter l'envoi
             }
             
@@ -258,21 +256,18 @@ async function connectToWhatsApp() {
         const energyBar = createHealthBar(updatedPlayer.energy);
         const weapon = WEAPONS[updatedPlayer.currentWeapon];
 
-        const statusMessage = `╔═══════════════════════╗
-║   📊 STATUT JOUEUR    ║
-╚═══════════════════════╝
+        const statusMessage = `Salut ${updatedPlayer.name} ! 😊
 
-👤 ${updatedPlayer.name}
+Voici ton état actuel :
 
 ❤️ VIE: ${healthBar} ${updatedPlayer.health}%
 ⚡ ÉNERGIE: ${energyBar} ${updatedPlayer.energy}%
 💰 ARGENT: ${updatedPlayer.money}$
 
-🔫 ARME ÉQUIPÉE: ${weapon.name}
-📦 ARMES: ${updatedPlayer.weapons.join(', ')}
+🔫 Tu as ton ${weapon.name} en main
+📦 Tes armes: ${updatedPlayer.weapons.join(', ')}
 
-📍 Position: (${updatedPlayer.position.x}, ${updatedPlayer.position.y})
-🏢 Lieu: ${updatedPlayer.position.location}
+📍 Tu es à (${updatedPlayer.position.x}, ${updatedPlayer.position.y}) dans ${updatedPlayer.position.location}
 
 🎯 Kills: ${updatedPlayer.kills} | 💀 Morts: ${updatedPlayer.deaths}`;
 
@@ -283,7 +278,7 @@ async function connectToWhatsApp() {
         console.log(`🔫 Commande tir reçue de ${senderName}`);
         if (!msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
           await sendMessageWithRetry(from, { 
-            text: '⚠️ Vous devez répondre au message de votre adversaire!\nUsage: /tire [partie]\nParties: tete, torse, bras, jambes' 
+            text: 'Hé ! Tu dois répondre au message de ton adversaire pour le viser 🎯\n\nÉcris par exemple: /tire tete\n(tete, torse, bras, jambes)' 
           });
           return;
         }
@@ -350,11 +345,11 @@ async function connectToWhatsApp() {
           })
           .where(eq(players.id, targetId));
 
-        let resultMessage = `🔫 ${player.name} tire sur ${target.name}!\n\n`;
-        resultMessage += `🎯 Partie visée: ${bodyPart.toUpperCase()}\n`;
-        resultMessage += `💥 Dégâts: -${damage}%\n`;
-        resultMessage += `🛡️ Protection (${target.position.location}): -${coverReduction}%\n`;
-        resultMessage += `❤️ Vie restante: ${createHealthBar(newHealth)} ${newHealth}%`;
+        let resultMessage = `🔫 ${player.name} vise et tire sur ${target.name} !\n\n`;
+        resultMessage += `🎯 Cible: ${bodyPart.toUpperCase()}\n`;
+        resultMessage += `💥 BAM ! -${damage}% de vie\n`;
+        resultMessage += `🛡️ Couvert par ${target.position.location} (-${coverReduction}%)\n`;
+        resultMessage += `❤️ ${target.name}: ${createHealthBar(newHealth)} ${newHealth}%`;
 
         if (newHealth <= 0) {
           await db.update(players)
@@ -374,7 +369,7 @@ async function connectToWhatsApp() {
             })
             .where(eq(players.id, sender));
 
-          resultMessage += `\n\n💀 ${target.name} EST MORT!\n💰 +500$ pour ${player.name}`;
+          resultMessage += `\n\n💀 ${target.name} s'effondre... Il est mort !\n💰 ${player.name} récupère 500$ sur le corps 💸`;
         }
 
         await sendMessageWithRetry(from, { text: resultMessage });
@@ -507,26 +502,27 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
       }
 
       else if (text.startsWith('/aide') || text.startsWith('/help')) {
-        const helpMessage = `🎮 COMMANDES DU JEU
+        const helpMessage = `Salut ${senderName} ! 😄 Je suis ton bot de combat !
 
-📊 /statut - Voir vos statistiques
-🔫 /tire [partie] - Tirer sur un adversaire (en réponse à son message)
-   Parties: tete, torse, bras, jambes
-📍 /localisation - Voir votre position
-🏃 /deplacer [lieu] - Se déplacer
-🛒 /acheter [arme] - Acheter une arme
-🎯 /equiper [arme] - Équiper une arme
+Voici ce que tu peux faire :
 
-🗺️ LIEUX DISPONIBLES:
+📊 /statut - Voir ton état
+🔫 /tire [partie] - Attaquer quelqu'un (réponds à son message d'abord !)
+📍 /localisation - Où tu es actuellement  
+🏃 /deplacer [lieu] - Bouger vers un autre endroit
+🛒 /acheter [arme] - Acheter une nouvelle arme
+🎯 /equiper [arme] - Changer d'arme
+
+🗺️ Endroits où aller :
 ${LOCATIONS.map(l => `• ${l.name}: ${l.description}`).join('\n')}
 
-🔫 ARMES DISPONIBLES:
+🔫 Armes dispo :
 ${Object.entries(WEAPONS).map(([key, w]) => 
-  `• ${w.name}: ${w.price}$ (Portée: ${w.range}m)`
+  `• ${w.name}: ${w.price}$ (${w.range}m de portée)`
 ).join('\n')}
 
-⚡ La vie se régénère de 10% par minute
-💀 Si vous mourrez, vous ne pouvez pas jouer pendant 1 heure`;
+💡 Tips : Ta vie remonte de 10% chaque minute !
+💀 Si tu meurs, tu attends 1h avant de revenir 😅`;
 
         await sendMessageWithRetry(from, { text: helpMessage });
       }
