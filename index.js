@@ -2,11 +2,13 @@ import makeWASocket, { DisconnectReason, useMultiFileAuthState, makeCacheableSig
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
-import { Pool } from '@neondatabase/serverless';
+import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { players } from './shared/schema.js';
 import { eq } from 'drizzle-orm';
 import ws from 'ws';
+
+neonConfig.webSocketConstructor = ws;
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle({ client: pool });
