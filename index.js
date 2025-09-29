@@ -137,11 +137,25 @@ async function connectToWhatsApp() {
     const senderName = msg.pushName || 'Joueur';
 
     console.log(`📨 Message reçu de ${senderName}: ${text}`);
+    console.log(`🔍 Type de chat: ${from.endsWith('@g.us') ? 'Groupe' : 'Privé'}`);
+    console.log(`👤 Sender ID: ${sender}`);
 
     try {
+      // Attendre un peu pour s'assurer que le message est bien reçu
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       const player = await getOrCreatePlayer(sender, senderName);
+      console.log(`🎮 Joueur chargé: ${player.name} (ID: ${player.id})`);
 
       if (player.isDead) {
+        console.log(`💀 Joueur ${player.name} est mort jusqu'à ${player.deadUntil}`);
+        const remainingTime = Math.ceil((new Date(player.deadUntil) - new Date()) / 60000);
+        if (remainingTime > 0) {
+          await sock.sendMessage(from, { 
+            text: `💀 Vous êtes mort ! Réapparition dans ${remainingTime} minutes.` 
+          });
+          console.log(`🔔 Message de mort envoyé à ${senderName}`);
+        }
         return;
       }
 
@@ -175,7 +189,13 @@ async function connectToWhatsApp() {
         console.log(`✅ Message statut envoyé à ${senderName}`);
       }
 
+      else if (text === '/statut' || text.startsWith('/statut')) {
+        console.log(`📊 Commande statut reçue de ${senderName}`);
+        // Le code existe déjà au-dessus
+      }
+      
       else if (text.startsWith('/tire')) {
+        console.log(`🔫 Commande tir reçue de ${senderName}`);
         if (!msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
           await sock.sendMessage(from, { 
             text: '⚠️ Vous devez répondre au message de votre adversaire!\nUsage: /tire [partie]\nParties: tete, torse, bras, jambes' 
@@ -278,6 +298,7 @@ async function connectToWhatsApp() {
       }
 
       else if (text.startsWith('/localisation')) {
+        console.log(`📍 Commande localisation reçue de ${senderName}`);
         const locationData = LOCATIONS.find(l => l.name === player.position.location);
         const nearbyLocations = LOCATIONS.filter(l => l.name !== player.position.location)
           .slice(0, 3)
@@ -299,6 +320,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
       }
 
       else if (text.startsWith('/deplacer')) {
+        console.log(`🏃 Commande déplacement reçue de ${senderName}`);
         const args = text.split(' ');
         const newLocation = args[1]?.toLowerCase();
 
@@ -333,6 +355,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
       }
 
       else if (text.startsWith('/acheter')) {
+        console.log(`🛒 Commande achat reçue de ${senderName}`);
         const args = text.split(' ');
         const weaponName = args[1]?.toLowerCase();
 
@@ -376,6 +399,7 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
       }
 
       else if (text.startsWith('/equiper')) {
+        console.log(`🎯 Commande équipement reçue de ${senderName}`);
         const args = text.split(' ');
         const weaponName = args[1]?.toLowerCase();
 
@@ -423,6 +447,18 @@ ${Object.entries(WEAPONS).map(([key, w]) =>
 
         await sock.sendMessage(from, { text: helpMessage });
         console.log(`✅ Message d'aide envoyé à ${senderName}`);
+      }
+      
+      else if (text.startsWith('/')) {
+        console.log(`❓ Commande inconnue reçue: ${text}`);
+        await sock.sendMessage(from, { 
+          text: `❌ Commande inconnue: ${text}\nUtilisez /aide pour voir les commandes disponibles.` 
+        });
+        console.log(`❌ Message d'erreur envoyé pour commande inconnue`);
+      }
+      
+      else {
+        console.log(`💬 Message non-commande ignoré: ${text}`);
       }
     } catch (error) {
       console.error('❌ Erreur détaillée:', error);
