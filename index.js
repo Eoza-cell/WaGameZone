@@ -119,24 +119,29 @@ async function connectToWhatsApp() {
             console.log(`🔐 Participants: ${groupMetadata.participants.length}`);
             
             // Vérifier si le bot est dans le groupe
-            const botNumber = sock.user?.id;
-            if (!botNumber) {
-              console.log(`❌ Impossible de récupérer l'ID du bot`);
-              throw new Error('ID du bot introuvable');
+            const botUser = sock.user;
+            if (!botUser) {
+              console.log(`❌ Impossible de récupérer les infos du bot`);
+              throw new Error('Infos du bot introuvables');
             }
+
+            console.log(`🔍 Bot user info:`, botUser);
 
             // Essayer différents formats d'ID pour trouver le bot
             const possibleBotIds = [
-              botNumber,
-              botNumber.split(':')[0] + '@s.whatsapp.net',
-              botNumber.split('@')[0] + '@s.whatsapp.net'
-            ];
+              botUser.id,
+              botUser.lid, // Format @lid
+              botUser.id.split(':')[0] + '@s.whatsapp.net',
+              botUser.id.split('@')[0] + '@s.whatsapp.net'
+            ].filter(Boolean); // Enlever les valeurs undefined
+
+            console.log(`🔍 IDs possibles du bot:`, possibleBotIds);
 
             let botParticipant = null;
             for (const id of possibleBotIds) {
               botParticipant = groupMetadata.participants.find(p => p.id === id);
               if (botParticipant) {
-                console.log(`🤖 Bot trouvé avec l'ID: ${id}`);
+                console.log(`✅ Bot trouvé avec l'ID: ${id}`);
                 break;
               }
             }
@@ -146,9 +151,8 @@ async function connectToWhatsApp() {
               console.log(`🔍 IDs testés:`, possibleBotIds);
               console.log(`👥 Participants du groupe:`, groupMetadata.participants.map(p => p.id));
               
-              // Le bot n'est pas membre, on ne peut pas envoyer de message dans ce groupe
-              console.log(`🚫 Impossible d'envoyer dans ce groupe - bot non membre`);
-              return null; // Arrêter l'envoi
+              // Essayer de continuer l'envoi quand même car parfois la détection échoue
+              console.log(`🔄 Tentative d'envoi malgré la détection échouée...`);
             }
             
             console.log(`🤖 Bot status dans le groupe: ${botParticipant.admin || 'member'}`);
