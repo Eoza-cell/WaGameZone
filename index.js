@@ -172,6 +172,7 @@ async function connectToWhatsApp() {
 🎯 Kills: ${updatedPlayer.kills} | 💀 Morts: ${updatedPlayer.deaths}`;
 
         await sock.sendMessage(from, { text: statusMessage });
+        console.log(`✅ Message statut envoyé à ${senderName}`);
       }
 
       else if (text.startsWith('/tire')) {
@@ -421,10 +422,17 @@ ${Object.entries(WEAPONS).map(([key, w]) =>
 💀 Si vous mourrez, vous ne pouvez pas jouer pendant 1 heure`;
 
         await sock.sendMessage(from, { text: helpMessage });
+        console.log(`✅ Message d'aide envoyé à ${senderName}`);
       }
     } catch (error) {
-      console.error('Erreur:', error);
-      await sock.sendMessage(from, { text: '❌ Une erreur est survenue!' });
+      console.error('❌ Erreur détaillée:', error);
+      console.error('📍 Contexte - From:', from, 'Sender:', sender, 'Text:', text);
+      try {
+        await sock.sendMessage(from, { text: '❌ Une erreur est survenue!' });
+        console.log('🆘 Message d\'erreur envoyé');
+      } catch (sendError) {
+        console.error('💥 Impossible d\'envoyer le message d\'erreur:', sendError);
+      }
     }
   });
 
