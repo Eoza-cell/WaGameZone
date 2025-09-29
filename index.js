@@ -138,11 +138,6 @@ async function connectToWhatsApp() {
       const player = await getOrCreatePlayer(sender, senderName);
       
       if (player.isDead) {
-        await sock.sendMessage(from, { 
-          text: '💀 Vous êtes mort! Vous réapparaîtrez dans ' + 
-                Math.ceil((new Date(player.deadUntil) - new Date()) / 60000) + ' minutes.' 
-        });
-        setTimeout(() => sock.chatModify({ delete: true, lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }] }, from), 2000);
         return;
       }
       
@@ -193,7 +188,20 @@ async function connectToWhatsApp() {
           return;
         }
         
+        const isGroup = from.endsWith('@g.us');
+        
+        if (!isGroup) {
+          await sock.sendMessage(from, { text: '⚠️ Le combat ne fonctionne que dans les groupes WhatsApp!' });
+          return;
+        }
+        
         const targetId = msg.message.extendedTextMessage.contextInfo.participant;
+        
+        if (!targetId || targetId === sender) {
+          await sock.sendMessage(from, { text: '⚠️ Impossible de tirer sur vous-même!' });
+          return;
+        }
+        
         const [target] = await db.select().from(players).where(eq(players.id, targetId));
         
         if (!target) {
