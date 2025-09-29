@@ -118,17 +118,41 @@ async function connectToWhatsApp() {
             console.log(`👥 Groupe: ${groupMetadata.subject}`);
             console.log(`🔐 Participants: ${groupMetadata.participants.length}`);
             
-            const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-            const botParticipant = groupMetadata.participants.find(p => p.id === botNumber);
+            // Vérifier si le bot est dans le groupe
+            const botNumber = sock.user?.id;
+            if (!botNumber) {
+              console.log(`❌ Impossible de récupérer l'ID du bot`);
+              throw new Error('ID du bot introuvable');
+            }
+
+            // Essayer différents formats d'ID pour trouver le bot
+            const possibleBotIds = [
+              botNumber,
+              botNumber.split(':')[0] + '@s.whatsapp.net',
+              botNumber.split('@')[0] + '@s.whatsapp.net'
+            ];
+
+            let botParticipant = null;
+            for (const id of possibleBotIds) {
+              botParticipant = groupMetadata.participants.find(p => p.id === id);
+              if (botParticipant) {
+                console.log(`🤖 Bot trouvé avec l'ID: ${id}`);
+                break;
+              }
+            }
             
             if (!botParticipant) {
               console.log(`❌ Bot pas dans le groupe ${groupMetadata.subject}`);
+              console.log(`🔍 IDs testés:`, possibleBotIds);
+              console.log(`👥 Participants du groupe:`, groupMetadata.participants.map(p => p.id));
               throw new Error('Bot non membre du groupe');
             }
             
             console.log(`🤖 Bot status dans le groupe: ${botParticipant.admin || 'member'}`);
           } catch (metaError) {
-            console.error(`⚠️ Impossible de récupérer les métadonnées du groupe:`, metaError.message);
+            console.error(`⚠️ Erreur métadonnées du groupe:`, metaError.message);
+            // Ne pas arrêter l'envoi, on essaie quand même
+            console.log(`🔄 Tentative d'envoi malgré l'erreur de métadonnées...`);
           }
         }
         
