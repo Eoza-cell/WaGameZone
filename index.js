@@ -145,14 +145,19 @@ async function connectToWhatsApp() {
               console.log(`❌ Bot pas dans le groupe ${groupMetadata.subject}`);
               console.log(`🔍 IDs testés:`, possibleBotIds);
               console.log(`👥 Participants du groupe:`, groupMetadata.participants.map(p => p.id));
-              throw new Error('Bot non membre du groupe');
+              
+              // Arrêter l'envoi si le bot n'est pas membre
+              await sendMessageWithRetry(from, { 
+                text: `❌ Le bot n'est pas membre de ce groupe !\n\n🔧 **Solutions :**\n1. Supprimez le bot du groupe\n2. Rajoutez-le comme membre\n3. Faites-le administrateur pour plus de permissions\n\n📱 Ou testez en message privé d'abord !` 
+              });
+              return null; // Arrêter l'envoi
             }
             
             console.log(`🤖 Bot status dans le groupe: ${botParticipant.admin || 'member'}`);
           } catch (metaError) {
             console.error(`⚠️ Erreur métadonnées du groupe:`, metaError.message);
-            // Ne pas arrêter l'envoi, on essaie quand même
-            console.log(`🔄 Tentative d'envoi malgré l'erreur de métadonnées...`);
+            // Si on n'arrive pas à récupérer les métadonnées, c'est probablement un problème de permissions
+            throw new Error(`Impossible d'accéder aux métadonnées du groupe: ${metaError.message}`);
           }
         }
         
