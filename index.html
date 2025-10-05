@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot QR Code</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: sans-serif;
+            background-color: #f0f2f5;
+        }
+        #qr-container {
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        h1 {
+            font-size: 1.5em;
+            color: #333;
+        }
+        p {
+            color: #666;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="qr-container">
+        <h1>Scan QR Code</h1>
+        <p id="status">Connecting to server...</p>
+        <img id="qr-code" src="" alt="QR Code will appear here">
+    </div>
+
+    <script>
+        const qrCodeImg = document.getElementById('qr-code');
+        const statusElement = document.getElementById('status');
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}`);
+
+        ws.onopen = () => {
+            console.log('WebSocket connection established');
+            statusElement.textContent = 'Waiting for QR code...';
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'qr') {
+                qrCodeImg.src = data.qr;
+                qrCodeImg.alt = 'Scan this QR code with WhatsApp';
+                statusElement.textContent = 'Please scan the QR code with WhatsApp.';
+            } else if (data.type === 'status') {
+                statusElement.textContent = data.message;
+                if (data.message.includes('connected')) {
+                    qrCodeImg.style.display = 'none';
+                }
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket connection closed');
+            statusElement.textContent = 'Connection closed. Please refresh the page.';
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            statusElement.textContent = 'Connection error. Please refresh the page.';
+        };
+    </script>
+</body>
+</html>
