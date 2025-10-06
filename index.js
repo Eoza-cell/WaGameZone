@@ -9,7 +9,7 @@ import { players } from './shared/schema.js';
 import { eq } from 'drizzle-orm';
 import express from 'express';
 import http from 'http';
-import { WebSocketServer } from 'ws';
+import ws, { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -30,6 +30,8 @@ server.listen(PORT, () => {
   console.log(`🚀 Server is listening on port ${PORT}`);
 });
 
+let currentQR = null;
+
 // Broadcast to all connected clients
 function broadcast(data) {
   wss.clients.forEach(client => {
@@ -39,8 +41,17 @@ function broadcast(data) {
   });
 }
 
-neonConfig.webSocketConstructor = WebSocketServer;
+wss.on('connection', (ws) => {
+  console.log('A new client connected.');
+  // If there's an active QR code, send it immediately to the new client
+  if (currentQR) {
+    ws.send(JSON.stringify({ type: 'qr', qr: currentQR }));
+  }
+});
 
+neonConfig.webSocketConstructor = ws;
+
+console.log(`Attempting to connect with DATABASE_URL: ${process.env.DATABASE_URL ? 'Loaded' : 'MISSING'}`);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle({ client: pool });
 
@@ -129,10 +140,10 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'error' }))
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'debug' }))
     },
     printQRInTerminal: false, // We'll handle QR display ourselves
-    logger: pino({ level: 'error' })
+    logger: pino({ level: 'debug' })
   });
 
   // Fonction pour envoyer un message avec retry et meilleure gestion des groupes
@@ -216,6 +227,7 @@ async function connectToWhatsApp() {
       console.log('QR code received, generating data URL...');
       try {
         const qrCodeUrl = await qrcode.toDataURL(qr);
+        currentQR = qrCodeUrl; // Store the latest QR code
         broadcast({ type: 'qr', qr: qrCodeUrl });
         console.log('QR code sent to web client.');
       } catch (err) {
@@ -236,6 +248,7 @@ async function connectToWhatsApp() {
       }
     } else if (connection === 'open') {
       console.log('✅ Bot WhatsApp connected successfully!');
+      currentQR = null; // Clear the QR code once connected
       broadcast({ type: 'status', message: 'WhatsApp bot connected successfully!' });
     } else if (connection === 'connecting') {
         console.log('Connecting to WhatsApp...');
