@@ -4,8 +4,8 @@ import makeWASocket, { DisconnectReason, useMultiFileAuthState, makeCacheableSig
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import qrcode from 'qrcode';
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import Database from 'better-sqlite3';
 import { players } from './shared/schema.js';
 import { eq } from 'drizzle-orm';
 import express from 'express';
@@ -13,6 +13,7 @@ import http from 'http';
 import ws, { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,11 +51,8 @@ wss.on('connection', (ws) => {
   }
 });
 
-neonConfig.webSocketConstructor = ws;
-
-console.log(`Attempting to connect with DATABASE_URL: ${process.env.DATABASE_URL ? 'Loaded' : 'MISSING'}`);
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const db = drizzle({ client: pool });
+const sqlite = new Database('wazone.db');
+const db = drizzle(sqlite);
 
 const WEAPONS = {
   pistolet: { name: 'Pistolet', damage: {tete: 40, torse: 25, bras: 10, jambes: 15 }, price: 0, range: 10 },
@@ -496,6 +494,53 @@ Utilisez /deplacer [lieu] pour vous déplacer`;
         });
       }
 
+      else if (text.startsWith('/ia')) {
+        const userPrompt = text.substring(4).trim();
+        if (!userPrompt) {
+          await sendMessageWithRetry(from, { text: '🤖 Veuillez donner un ordre à l\'IA. Exemple: /ia va dans un endroit sûr' });
+          return;
+        }
+
+        await sendMessageWithRetry(from, { text: '🧠 L\'IA réfléchit à votre ordre...' });
+
+        const locationNames = LOCATIONS.map(l => l.name).join(', ');
+        const systemPrompt = `Tu es une IA tactique dans un jeu de guerre. Un joueur te donne un ordre de déplacement. Ta seule tâche est de choisir le lieu le plus approprié parmi les options suivantes : ${locationNames}. Réponds avec UN SEUL mot : le nom du lieu.`;
+
+        try {
+          const aiLocation = await getAiChoice(userPrompt, systemPrompt);
+          const locationData = LOCATIONS.find(l => l.name === aiLocation);
+
+          if (!locationData) {
+            await sendMessageWithRetry(from, { text: `🤖 L'IA a suggéré un lieu invalide : ${aiLocation}` });
+            return;
+          }
+
+          if (player.energy < 20) {
+            await sendMessageWithRetry(from, { text: '⚠️ Pas assez d\'énergie pour vous déplacer!' });
+            return;
+          }
+
+          const newX = Math.floor(Math.random() * 100);
+          const newY = Math.floor(Math.random() * 100);
+
+          await db.update(players)
+            .set({
+              position: { x: newX, y: newY, location: aiLocation },
+              energy: player.energy - 20,
+              updatedAt: Date.now()
+            })
+            .where(eq(players.id, sender));
+
+          await sendMessageWithRetry(from, {
+            text: `🤖 Sur ordre de l'IA, vous vous déplacez vers ${locationData.name}!\n📍 Nouvelle position: (${newX}, ${newY})\n${locationData.description}\n⚡ -20% énergie`
+          });
+
+        } catch (error) {
+          console.error("Erreur de l'IA:", error);
+          await sendMessageWithRetry(from, { text: '🤖 L\'IA a rencontré une erreur. Veuillez réessayer.' });
+        }
+      }
+
       else if (text.startsWith('/acheter')) {
         console.log(`🛒 Commande achat reçue de ${senderName}`);
         const args = text.split(' ');
@@ -635,5 +680,30 @@ setInterval(async () => {
     console.error('Erreur lors de la régénération automatique:', error);
   }
 }, 60000); // 60 secondes
+
+async function getAiChoice(prompt, systemPrompt) {
+  const url = "https://text.pollinations.ai";
+  const data = {
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt }
+    ],
+    model: "openai",
+    seed: Math.floor(Math.random() * 1000000),
+    jsonMode: false,
+    private: true,
+    stream: false
+  };
+
+  try {
+    const response = await axios.post(url, data);
+    // L'API de Pollinations peut retourner une chaîne de texte, nous prenons la première ligne
+    // et nous enlevons les caractères superflus.
+    return response.data.trim().split('\n')[0].toLowerCase().replace(/[^a-z]/g, '');
+  } catch (error) {
+    console.error("Erreur lors de l'appel à l'API de Pollinations:", error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
 
 connectToWhatsApp();
