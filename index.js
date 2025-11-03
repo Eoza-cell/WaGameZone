@@ -1,16 +1,58 @@
 
+import 'dotenv/config';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
-import qrcode from 'qrcode-terminal';
+import qrcode from 'qrcode';
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { players } from './shared/schema.js';
 import { eq } from 'drizzle-orm';
-import ws from 'ws';
+import express from 'express';
+import http from 'http';
+import ws, { WebSocketServer } from 'ws';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+// Serve static files
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Server is listening on port ${PORT}`);
+});
+
+let currentQR = null;
+
+// Broadcast to all connected clients
+function broadcast(data) {
+  wss.clients.forEach(client => {
+    if (client.readyState === client.OPEN) {
+      client.send(JSON.stringify(data));
+    }
+  });
+}
+
+wss.on('connection', (ws) => {
+  console.log('A new client connected.');
+  // If there's an active QR code, send it immediately to the new client
+  if (currentQR) {
+    ws.send(JSON.stringify({ type: 'qr', qr: currentQR }));
+  }
+});
 
 neonConfig.webSocketConstructor = ws;
 
+console.log(`Attempting to connect with DATABASE_URL: ${process.env.DATABASE_URL ? 'Loaded' : 'MISSING'}`);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle({ client: pool });
 
@@ -99,10 +141,10 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'error' }))
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'debug' }))
     },
-    printQRInTerminal: true,
-    logger: pino({ level: 'error' })
+    printQRInTerminal: false, // We'll handle QR display ourselves
+    logger: pino({ level: 'debug' })
   });
 
   // Fonction pour envoyer un message avec retry et meilleure gestion des groupes
@@ -179,24 +221,39 @@ async function connectToWhatsApp() {
     }
   };
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('Scannez ce QR code avec WhatsApp:');
-      qrcode.generate(qr, { small: true });
+      console.log('QR code received, generating data URL...');
+      try {
+        const qrCodeUrl = await qrcode.toDataURL(qr);
+        currentQR = qrCodeUrl; // Store the latest QR code
+        broadcast({ type: 'qr', qr: qrCodeUrl });
+        console.log('QR code sent to web client.');
+      } catch (err) {
+        console.error('Failed to generate QR code', err);
+      }
     }
 
     if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error instanceof Boom) 
+      const shouldReconnect = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
         : true;
+
+      broadcast({ type: 'status', message: `Connection closed. Reconnecting: ${shouldReconnect}` });
+      console.log(`Connection closed due to ${lastDisconnect?.error}, reconnecting: ${shouldReconnect}`);
 
       if (shouldReconnect) {
         connectToWhatsApp();
       }
     } else if (connection === 'open') {
-      console.log('✅ Bot WhatsApp connecté avec succès!');
+      console.log('✅ Bot WhatsApp connected successfully!');
+      currentQR = null; // Clear the QR code once connected
+      broadcast({ type: 'status', message: 'WhatsApp bot connected successfully!' });
+    } else if (connection === 'connecting') {
+        console.log('Connecting to WhatsApp...');
+        broadcast({ type: 'status', message: 'Connecting to WhatsApp...' });
     }
   });
 
